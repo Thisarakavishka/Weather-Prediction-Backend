@@ -10,21 +10,23 @@ import os
 
 app = FastAPI()
 
-# Enable CORS
+# --- 1. CORS CONFIGURATION ---
+# Read from environment variable for production
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[FRONTEND_URL, "http://localhost:5173"], # Allows both local and production
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- GLOBAL ASSETS ---
+# --- 2. GLOBAL ASSETS & LOADING ---
 model = None
 scaler_x = None
 scaler_y = None
 feature_cols = []
 
-# This ensures the model loads correctly on your Mac
 custom_objects = {
     'mse': tf.keras.losses.MeanSquaredError(), 
     'mae': tf.keras.metrics.MeanAbsoluteError()
@@ -34,63 +36,55 @@ custom_objects = {
 async def startup_event():
     global model, scaler_x, scaler_y, feature_cols
     try:
-        model = tf.keras.models.load_model('models/model_lstm_final.h5', custom_objects=custom_objects, compile=False)
+        # Construct absolute path to avoid issues on cloud servers
+        base_path = os.path.dirname(__file__)
+        model_path = os.path.join(base_path, 'models', 'model_lstm_final.h5')
+        
+        model = tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
         model.compile(optimizer='adam', loss='mse')
-        scaler_x = joblib.load('models/scaler_x.pkl')
-        scaler_y = joblib.load('models/scaler_y.pkl')
-        with open('models/feature_columns.json', 'r') as f:
+        
+        scaler_x = joblib.load(os.path.join(base_path, 'models', 'scaler_x.pkl'))
+        scaler_y = joblib.load(os.path.join(base_path, 'models', 'scaler_y.pkl'))
+        
+        with open(os.path.join(base_path, 'models', 'feature_columns.json'), 'r') as f:
             feature_cols = json.load(f)
         print("✅ Backend Assets Loaded Successfully")
     except Exception as e:
         print(f"❌ Error loading assets: {e}")
 
+# --- 3. MODELS & ENDPOINTS ---
 class WeatherRequest(BaseModel):
     daily_history: list 
 
-# --- NEW: HEALTH CHECK ENDPOINT ---
-# Use this to show "API Connected" on your Frontend
 @app.get("/health")
 async def health_check():
     return {
         "status": "connected",
         "model_ready": model is not None,
-        "device": "CPU/MPS"
+        "api_connected_label": "API Connected ✅" # This helps your frontend
     }
 
 @app.post("/predict")
 async def predict_weather(request: WeatherRequest):
     try:
-        # 1. Convert to DataFrame
         df = pd.DataFrame(request.daily_history)
         df['date'] = pd.to_datetime(df['date'])
         
-        # 2. MATCH NOTEBOOK FEATURE ENGINEERING
-        # The AI was trained on: ['MinTemp_Lag1', 'MaxTemp_Lag1', 'Temp_Rolling_7d', 'Month']
+        # Feature Engineering
         df['Month'] = df['date'].dt.month
-        
-        # We need to compute features based on the history provided
         df['MinTemp_Lag1'] = df['min_temp'].shift(1)
         df['MaxTemp_Lag1'] = df['max_temp'].shift(1)
         df['Temp_Rolling_7d'] = df['min_temp'].rolling(window=7).mean()
-
-        # IMPORTANT: Fill NaNs from the beginning of the sequence so we don't lose data
         df = df.bfill() 
         
-        # 3. SELECT THE LATEST ROW
-        # This row represents "Today's features" which the model uses to see "Tomorrow"
         latest_row = df.tail(1)[feature_cols]
-        
-        # 4. SCALE & RESHAPE
         scaled_row = scaler_x.transform(latest_row)
-        # Note: Your model was trained with (samples, 1, features)
         lstm_input = scaled_row.reshape(1, 1, len(feature_cols))
         
-        # 5. PREDICT
         pred_scaled = model.predict(lstm_input)
         result_f = float(scaler_y.inverse_transform(pred_scaled)[0][0])
         
-        # 6. SAFETY CLIP (Based on Sri Lanka / Training Bounds)
-        # Prevents the model from giving unrealistic numbers if the input is noisy
+        # Safety Clip for Sri Lanka context
         result_f = max(min(result_f, 105), 35) 
 
         return {
@@ -100,3 +94,10 @@ async def predict_weather(request: WeatherRequest):
         }
     except Exception as e:
         return {"error": str(e)}
+
+# --- 4. SERVER START (MUST BE AT THE BOTTOM) ---
+if __name__ == "__main__":
+    import uvicorn
+    # Use 0.0.0.0 for Render to bind to all network interfaces
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
