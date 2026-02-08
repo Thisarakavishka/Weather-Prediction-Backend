@@ -1,24 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import weather
+from routes import weather 
 import os
 
 app = FastAPI(title="Minima AI Engine")
 
-# CORS Setup
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+# --- CORS CONFIGURATION (ALLOW ALL) ---
+# This fixes the "OPTIONS 400 Bad Request" error in production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],     # Allows any website (Vercel, Localhost, etc.)
+    allow_credentials=False, # Must be False when using "*"
+    allow_methods=["*"],     # Allows GET, POST, OPTIONS, etc.
+    allow_headers=["*"],     # Allows all headers
 )
 
-# Include our organized routes
+# Include the organized weather endpoints
 app.include_router(weather.router)
 
+# --- RENDER DEPLOYMENT BINDING ---
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
