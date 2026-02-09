@@ -2,9 +2,9 @@
 
 The computational heart of **Minima AI**, providing real-time LSTM (Long Short-Term Memory) inference for high-precision weather forecasting.
 
-* **Live API:** `https://your-backend-name.onrender.com`
+* **Live API:** [https://weather-prediction-backend-x4pv.onrender.com](https://weather-prediction-backend-x4pv.onrender.com)
 * **Production Frontend:** [https://minimaai.vercel.app/](https://minimaai.vercel.app/)
-
+* **Frontend:** [https://github.com/Thisarakavishka/Weather-Prediction-Frontend](https://github.com/Thisarakavishka/Weather-Prediction-Frontend)
 ---
 
 ## 🚀 Overview
